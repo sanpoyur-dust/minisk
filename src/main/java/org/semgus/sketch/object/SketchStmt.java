@@ -21,7 +21,7 @@ public interface SketchStmt {
   record CondStmt(SketchExpr i, SketchStmt t, SketchStmt e) implements SketchStmt {
     @Override
     public String toString() {
-      return "if (" + i.toString() + ") { " + t.toString() + " } else {" + e.toString() + " }";
+      return "if (" + i.toString() + ") { " + t.toString() + " } else { " + e.toString() + " }";
     }
   }
 
