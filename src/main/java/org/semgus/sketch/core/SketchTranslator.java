@@ -111,7 +111,7 @@ public class SketchTranslator {
         );
         case "true" -> new SketchExpr.ConstExpr("true");
         case "false" -> new SketchExpr.ConstExpr("false");
-        default -> throw new IllegalStateException("Unexpected value: " + app.name().name());
+        default -> new SketchExpr.ConstExpr(app.name().name());
       };
     }
 
@@ -228,7 +228,35 @@ public class SketchTranslator {
 
     for (SmtTerm constraint : problem.constraints()) {
       if (constraint instanceof SmtTerm.Application app) {
-//        System.out.println(app);
+        List<List<String>> attrLists = semNameToAttrLists.get(app.name().name());
+        int ind = 0;
+        String callName = "";
+        List<SketchExpr> callArgs = new ArrayList<>();
+        SketchExpr outputExpr = null;
+        for (SmtTerm.Application.TypedTerm appArg : app.arguments()) {
+          // TODO: support bit vectors
+          String typeName = getTypeName(appArg.type().name());
+          List<String> attrList = attrLists.get(ind);
+          if (outputExpr == null && attrList.contains("output")) {
+            outputExpr = eval(appArg.term(), new HashMap<>());
+          } else if (attrList.contains("input")) {
+            callArgs.add(eval(appArg.term(), new HashMap<>()));
+          } else if (attrList.isEmpty()) {
+            callName = eval(appArg.term(), new HashMap<>()).toString();
+          }
+          ++ind;
+        }
+        body = new SketchStmt.SeqStmt(
+            body,
+            " ",
+            new SketchStmt.ConstStmt(
+                "assert",
+                new SketchExpr.BinaryExpr(
+                    new SketchExpr.FuncExpr(callName, callArgs),
+                    "==",
+                    outputExpr
+                ))
+        );
       }
     }
 
@@ -242,7 +270,32 @@ public class SketchTranslator {
     List<SketchStmt> defs = new ArrayList<>();
 
     for (SemgusNonTerminal nonTerminal : problem.nonTerminals().values()) {
-      defs.add(getSemDefStmt(nonTerminal));
+      SketchStmt semDefStmt = getSemDefStmt(nonTerminal);
+      defs.add(semDefStmt);
+
+      // target function
+      if (semDefStmt instanceof SketchStmt.funcDefStmt s && nonTerminal.equals(problem.targetNonTerminal())) {
+        List<SketchDecl> targetArgs = new ArrayList<>(s.args());
+        List<SketchExpr> callArgs =
+            s.args().stream().map(decl -> new SketchExpr.ConstExpr(decl.name())).collect(Collectors.toList());
+        targetArgs.remove(targetArgs.size() - 1);
+        defs.add(
+            new SketchStmt.funcDefStmt(
+                new SketchDecl(
+                    s.decl().type().replaceAll("generator ", ""),
+                    problem.targetName()),
+                targetArgs,
+                new SketchStmt.SeqStmt(
+                    new SketchStmt.varDefStmt(
+                        new SketchDecl("int", "bnd"),
+                        new SketchExpr.ConstExpr("3")
+                    ),
+                    " ",
+                    new SketchStmt.ConstStmt(
+                        "return",
+                        new SketchExpr.FuncExpr(problem.targetNonTerminal().name(), callArgs)))
+            ));
+      }
     }
 
     defs.add(
@@ -256,7 +309,7 @@ public class SketchTranslator {
                 new SketchExpr.ConstExpr("i"),
                 new SketchStmt.ConstStmt("return", new SketchExpr.ConstExpr("t")),
                 new SketchStmt.ConstStmt("return", new SketchExpr.ConstExpr("e")))
-            ));
+        ));
 
     defs.add(getHarnessDefStmt());
     return new Sketch(defs);
