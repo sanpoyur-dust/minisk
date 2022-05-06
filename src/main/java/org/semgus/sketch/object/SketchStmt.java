@@ -1,5 +1,8 @@
 package org.semgus.sketch.object;
 
+import java.util.List;
+import java.util.stream.Collectors;
+
 public interface SketchStmt {
   record ConstStmt(String keyword, SketchExpr expr) implements SketchStmt {
     @Override
@@ -8,10 +11,10 @@ public interface SketchStmt {
     }
   }
 
-  record SeqStmt(SketchStmt lhs, SketchStmt rhs) implements SketchStmt {
+  record SeqStmt(SketchStmt lhs, String sep, SketchStmt rhs) implements SketchStmt {
     @Override
     public String toString() {
-      return lhs.toString() + " " + rhs.toString();
+      return lhs.toString() + sep + rhs.toString();
     }
   }
 
@@ -19,6 +22,23 @@ public interface SketchStmt {
     @Override
     public String toString() {
       return "if (" + i.toString() + ") { " + t.toString() + " } else {" + e.toString() + " }";
+    }
+  }
+
+  record varDefStmt(SketchTyped typed, SketchExpr expr) implements SketchStmt {
+    @Override
+    public String toString() {
+      return typed.toString() + " = " + expr.toString() + ";";
+    }
+  }
+
+  record funcDefStmt(SketchTyped typed, List<SketchTyped> args, SketchStmt stmt) implements SketchStmt {
+    @Override
+    public String toString() {
+      String content = args.stream()
+          .map(SketchTyped::toString)
+          .collect(Collectors.joining(", "));
+      return typed.toString() + "(" + content + ") { " + stmt.toString() + " }";
     }
   }
 }
