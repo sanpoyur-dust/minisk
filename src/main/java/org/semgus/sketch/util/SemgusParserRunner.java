@@ -2,11 +2,10 @@ package org.semgus.sketch.util;
 
 import java.io.*;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 public class SemgusParserRunner {
-  private static Process parserProcess = null;
-
-  public static Reader run(String input) {
+  public static String run(String input) {
     String osName = System.getProperty("os.name");
     String parserPath;
     if (osName.startsWith("Windows")) {
@@ -21,19 +20,20 @@ public class SemgusParserRunner {
       String uri = new File(
           Objects.requireNonNull(SemgusParserRunner.class.getResource(parserPath)).toURI())
           .toString();
-      parserProcess =
+      Process parserProcess =
           new ProcessBuilder(
           uri, "--format", "json", "--mode", "batch", input)
           .start();
-      return new BufferedReader(new InputStreamReader(parserProcess.getInputStream()));
+
+      BufferedReader reader = new BufferedReader(new InputStreamReader(parserProcess.getInputStream()));
+      String json = reader.lines().collect(Collectors.joining());
+      parserProcess.destroy();
+
+      return json;
     } catch (Exception e) {
       e.printStackTrace();
     }
 
-    return null;
-  }
-
-  public static void terminate() {
-    parserProcess.destroy();
+    return "";
   }
 }
