@@ -1,13 +1,14 @@
-package org.semgus.sketch;
+package org.semgus.sketch.util;
 
 import java.io.*;
+import java.util.Objects;
 
 public class SemgusParserRunner {
   private static Process parserProcess = null;
 
   public static Reader run(String input) {
     String osName = System.getProperty("os.name");
-    String parserPath = null;
+    String parserPath;
     if (osName.startsWith("Windows")) {
       parserPath = "/semgus-parser-win.exe";
     } else if (osName.startsWith("Mac OS")) {
@@ -17,7 +18,9 @@ public class SemgusParserRunner {
     }
 
     try {
-      String uri = new File(SemgusParserRunner.class.getResource(parserPath).toURI()).toString();
+      String uri = new File(
+          Objects.requireNonNull(SemgusParserRunner.class.getResource(parserPath)).toURI())
+          .toString();
       parserProcess =
           new ProcessBuilder(
           uri, "--format", "json", "--mode", "batch", input)
