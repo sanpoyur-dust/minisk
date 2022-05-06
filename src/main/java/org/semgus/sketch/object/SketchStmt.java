@@ -25,20 +25,27 @@ public interface SketchStmt {
     }
   }
 
-  record varDefStmt(SketchTyped typed, SketchExpr expr) implements SketchStmt {
+  record varDefStmt(SketchDecl decl, SketchExpr expr) implements SketchStmt {
     @Override
     public String toString() {
-      return typed.toString() + " = " + expr.toString() + ";";
+      return decl.toString() + " = " + expr.toString() + ";";
     }
   }
 
-  record funcDefStmt(SketchTyped typed, List<SketchTyped> args, SketchStmt stmt) implements SketchStmt {
+  record funcDefStmt(SketchDecl decl, List<SketchDecl> args, SketchStmt stmt) implements SketchStmt {
     @Override
     public String toString() {
       String content = args.stream()
-          .map(SketchTyped::toString)
+          .map(SketchDecl::toString)
           .collect(Collectors.joining(", "));
-      return typed.toString() + "(" + content + ") { " + stmt.toString() + " }";
+      return decl.toString() + "(" + content + ") { " + stmt.toString() + " }";
+    }
+  }
+
+  record declStmt(SketchDecl decl) implements SketchStmt {
+    @Override
+    public String toString() {
+      return decl.toString() + ";";
     }
   }
 }
