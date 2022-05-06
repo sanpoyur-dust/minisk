@@ -14,7 +14,7 @@ public interface SketchExpr {
   record BinaryExpr(SketchExpr lhs, String binop, SketchExpr rhs) implements SketchExpr {
     @Override
     public String toString() {
-      return lhs.toString() + " " + binop + " " + rhs.toString();
+      return "(" + lhs.toString() + " " + binop + " " + rhs.toString() + ")";
     }
   }
 
