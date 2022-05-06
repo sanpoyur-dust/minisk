@@ -7,7 +7,7 @@ public record SketchDef(SketchTyped typed, List<SketchTyped> args, SketchStmt st
   @Override
   public String toString() {
     String content = args.stream()
-        .map(Object::toString)
+        .map(SketchTyped::toString)
         .collect(Collectors.joining(", "));
     return typed.toString() + "(" + content + ") { " + stmt.toString() + " }";
   }

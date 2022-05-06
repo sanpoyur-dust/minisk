@@ -7,7 +7,7 @@ public record Sketch(List<SketchDef> defs) {
   @Override
   public String toString() {
     return defs.stream()
-        .map(Object::toString)
+        .map(SketchDef::toString)
         .collect(Collectors.joining("\n"));
   }
 }

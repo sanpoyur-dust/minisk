@@ -22,7 +22,7 @@ public interface SketchExpr {
     @Override
     public String toString() {
       String content = args.stream()
-          .map(Object::toString)
+          .map(SketchExpr::toString)
           .collect(Collectors.joining(", "));
       return name + "(" + content + ")";
     }
@@ -32,7 +32,7 @@ public interface SketchExpr {
     @Override
     public String toString() {
       String content = exprs.stream()
-          .map(Object::toString)
+          .map(SketchExpr::toString)
           .collect(Collectors.joining(" | "));
       return "{| " + content + " |}";
     }
