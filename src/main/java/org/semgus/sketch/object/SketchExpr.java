@@ -18,6 +18,13 @@ public interface SketchExpr {
     }
   }
 
+  record CondExpr(SketchExpr i, SketchExpr t, SketchExpr e) implements SketchExpr {
+    @Override
+    public String toString() {
+      return "(" + i.toString() + " ? " + t.toString() + " : " + e.toString() + ")";
+    }
+  }
+
   record FuncExpr(String name, List<SketchExpr> args) implements SketchExpr {
     @Override
     public String toString() {

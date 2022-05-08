@@ -51,10 +51,6 @@ public class SketchTranslator {
     // TODO: support quantifiers
     if (term instanceof SmtTerm.Application app) {
       return switch (app.name().name()) {
-        case "=" -> new SketchExpr.BinaryExpr(
-            eval(app.arguments().get(0).term(), dict),
-            "=",
-            eval(app.arguments().get(1).term(), dict));
         case "+" -> new SketchExpr.BinaryExpr(
             eval(app.arguments().get(0).term(), dict),
             "+",
@@ -87,7 +83,7 @@ public class SketchTranslator {
             eval(app.arguments().get(0).term(), dict),
             "<=",
             eval(app.arguments().get(1).term(), dict));
-        case "==" -> new SketchExpr.BinaryExpr(
+        case "=" -> new SketchExpr.BinaryExpr(
             eval(app.arguments().get(0).term(), dict),
             "==",
             eval(app.arguments().get(1).term(), dict));
@@ -105,10 +101,10 @@ public class SketchTranslator {
             eval(app.arguments().get(1).term(), dict));
         case "not" -> new SketchExpr.ConstExpr(
             "!" + eval(app.arguments().get(0).term(), dict));
-        case "ite" -> new SketchExpr.FuncExpr(
-            "__ite",
-            app.arguments().stream().map(t -> eval(t.term(), dict)).collect(Collectors.toList())
-        );
+        case "ite" -> new SketchExpr.CondExpr(
+            eval(app.arguments().get(0).term(), dict),
+            eval(app.arguments().get(1).term(), dict),
+            eval(app.arguments().get(2).term(), dict));
         case "true" -> new SketchExpr.ConstExpr("true");
         case "false" -> new SketchExpr.ConstExpr("false");
         default -> new SketchExpr.ConstExpr(app.name().name());
@@ -191,14 +187,14 @@ public class SketchTranslator {
 
       SmtTerm constraint = rule.constraint();
       SketchExpr e = eval(constraint, callExprs);
-      if (e instanceof SketchExpr.BinaryExpr be && be.binop().equals("=")) {
+      if (e instanceof SketchExpr.BinaryExpr be && be.binop().equals("==")) {
         if (be.lhs().toString().equals(outputName)) {
           exprs.add(be.rhs());
         } else if (be.rhs().toString().equals(outputName)) {
           exprs.add(be.lhs());
         }
       } else {
-        throw new IllegalStateException("Cannot handle complicated nonterminal constraint.");
+        throw new IllegalStateException("Not a well-formed semantics relation.");
       }
     }
 
@@ -297,19 +293,6 @@ public class SketchTranslator {
             ));
       }
     }
-
-    defs.add(
-        new SketchStmt.funcDefStmt(
-            new SketchDecl("int", "__ite"),
-            Arrays.asList(
-                new SketchDecl("bit", "i"),
-                new SketchDecl("int", "t"),
-                new SketchDecl("int", "e")),
-            new SketchStmt.CondStmt(
-                new SketchExpr.ConstExpr("i"),
-                new SketchStmt.ConstStmt("return", new SketchExpr.ConstExpr("t")),
-                new SketchStmt.ConstStmt("return", new SketchExpr.ConstExpr("e")))
-        ));
 
     defs.add(getHarnessDefStmt());
     return new Sketch(defs);
