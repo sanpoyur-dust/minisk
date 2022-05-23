@@ -35,6 +35,13 @@ public interface SketchExpr {
     }
   }
 
+  record FieldExpr(SketchExpr expr, String field) implements SketchExpr {
+    @Override
+    public String toString() {
+      return expr + "." + field;
+    }
+  }
+
   record RegExpr(List<SketchExpr> exprs) implements SketchExpr {
     @Override
     public String toString() {

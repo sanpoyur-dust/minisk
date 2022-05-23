@@ -10,7 +10,7 @@ public class SemgusParserRunner {
     String parserPath;
     if (osName.startsWith("Windows")) {
       parserPath = "/semgus-parser-win.exe";
-    } else if (osName.startsWith("Mac OS")) {
+    } else if (osName.startsWith("Mac")) {
       parserPath = "/semgus-parser-osx";
     } else {
       parserPath = "/semgus-parser-linux";
@@ -20,6 +20,11 @@ public class SemgusParserRunner {
       String uri = new File(
           Objects.requireNonNull(SemgusParserRunner.class.getResource(parserPath)).toURI())
           .toString();
+
+      if (osName.startsWith("Mac")) {
+        new ProcessBuilder("chmod", "u+x", uri).start();
+      }
+
       Process parserProcess =
           new ProcessBuilder(
           uri, "--format", "json", "--mode", "batch", input)
