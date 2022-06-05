@@ -1,0 +1,44 @@
+struct out_1 {
+    int ra;
+    int rb;
+}
+
+generator out_1 plus(int xa, int xb, int ya, int yb, int bnd) {
+    out_1 et1 = E(xa, xb, ya, yb, bnd - 1);
+    out_1 et2 = E(xa, xb, ya, yb, bnd - 1);
+    out_1 et = new out_1();
+    et.ra = et1.ra + et2.ra;
+    et.rb = et1.rb + et2.rb;
+    return et;
+}
+
+generator bit lt(int xa, int xb, int ya, int yb, int bnd) {
+    out_1 et1 = E(xa, xb, ya, yb, bnd - 1);
+    out_1 et2 = E(xa, xb, ya, yb, bnd - 1);
+    return et1.ra + et1.rb < et2.ra + et2.rb;
+}
+
+generator out_1 E (int xa, int xb, int ya, int yb, int bnd) {
+    assert bnd > 0;
+    return {| new out_1(ra=xa, rb=xb) | new out_1(ra=ya, rb=yb) | new out_1(ra=0, rb=0) | new out_1(ra=1, rb=1) | plus(xa, xb, ya, yb, bnd) | B(xa, xb, ya, yb, bnd - 1) ? E(xa, xb, ya, yb, bnd - 1) : E(xa, xb, ya, yb, bnd - 1) |};
+}
+
+generator bit B(int xa, int xb, int ya, int yb, int bnd) {
+    assert bnd > 0; 
+    return {| true | false | (B(xa, xb, ya, yb, bnd - 1) && B(xa, xb, ya, yb, bnd - 1)) | (B(xa, xb, ya, yb, bnd - 1) || B(xa, xb, ya, yb, bnd - 1)) | lt(xa, xb, ya, yb, bnd) | !B(xa, xb, ya, yb, bnd - 1) |}; 
+}
+
+out_1 max2(int xa, int xb, int ya, int yb) {
+    int bnd = 3;
+    return E(xa, xb, ya, yb, bnd);
+}
+
+harness void __sketch() {
+    assert true;
+    out_1 r1 = max2(4, 2, 3, 2);
+    assert (r1.ra == 4 && r1.rb == 2);
+    out_1 r2 = max2(6, 0, 2, 5);
+    assert(r2.ra == 2 && r2.rb == 5);
+    out_1 r3 = max2(2, 3 + 4, 1, 1);
+    assert(r3.ra == 2 && r3.rb == 7);
+}
