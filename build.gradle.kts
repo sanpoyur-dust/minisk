@@ -12,7 +12,7 @@ repositories {
 
 dependencies {
     implementation("com.googlecode.json-simple:json-simple:1.1.1")
-    implementation("com.github.SemGuS-git:Semgus-Java:1.0.1")
+    implementation("com.github.SemGuS-git:Semgus-Java:1.0.2")
 
     testImplementation("org.junit.jupiter:junit-jupiter-api:5.6.0")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine")

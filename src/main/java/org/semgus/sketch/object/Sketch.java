@@ -3,10 +3,15 @@ package org.semgus.sketch.object;
 import java.util.List;
 import java.util.stream.Collectors;
 
-public record Sketch(List<SketchStmt> defs) {
+/**
+ * A sketch.
+ *
+ * @param stmts The list of sketch statements.
+ */
+public record Sketch(List<SketchStmt> stmts) {
   @Override
   public String toString() {
-    return defs.stream()
+    return stmts.stream()
         .map(SketchStmt::toString)
         .collect(Collectors.joining("\n"));
   }

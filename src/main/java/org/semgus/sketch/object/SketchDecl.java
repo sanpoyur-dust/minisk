@@ -1,8 +1,14 @@
 package org.semgus.sketch.object;
 
-public record SketchDecl(String type, String name) {
+/**
+ * A sketch declaration.
+ *
+ * @param type The declaration type
+ * @param name The declaration name
+ */
+public record SketchDecl(SketchType type, String name) {
   @Override
   public String toString() {
-    return type + " " + name;
+    return type.toString() + " " + name;
   }
 }

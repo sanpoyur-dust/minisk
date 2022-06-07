@@ -1,7 +1,5 @@
 package org.semgus.sketch.core;
 
-import org.semgus.java.event.SemgusSpecEvent;
-import org.semgus.java.event.SpecEvent;
 import org.semgus.java.object.RelationApp;
 import org.semgus.java.object.SmtTerm;
 import org.semgus.java.object.TypedVar;
@@ -15,286 +13,328 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 public class SketchTranslator {
-  SemgusProblem problem;
-  Map<String, List<List<String>>> semNameToAttrLists;
+  // the problem to translate from
+  private final SemgusProblem problem;
+  // relation names -> non-terminals
+  private final Map<String, NonTerminal> nonTerminals;
+  private Sketch sketch;
 
-  public SketchTranslator(SemgusProblem problem, List<SpecEvent> events) {
+  /**
+   * Constructor.
+   *
+   * @param problem A SemGuS problem
+   */
+  public SketchTranslator(SemgusProblem problem) {
     this.problem = problem;
-    this.semNameToAttrLists = new HashMap<>();
-
-    for (SpecEvent event : events) {
-      if (event instanceof SemgusSpecEvent.HornClauseEvent hce) {
-        String semName = hce.head().name();
-        if (semNameToAttrLists.containsKey(semName)) {
-          continue;
-        }
-        semNameToAttrLists.put(semName, new ArrayList<>());
-        List<List<String>> attrLists = semNameToAttrLists.get(semName);
-
-        // the argument order matters
-        for (TypedVar arg : hce.head().arguments()) {
-          attrLists.add(new ArrayList<>(hce.variables().get(arg.name()).attributes().keySet()));
-        }
-      }
+    this.nonTerminals = new HashMap<>();
+    for (SemgusNonTerminal semgusNonTerminal : problem.nonTerminals().values()) {
+      NonTerminal nonTerminal = new NonTerminal(semgusNonTerminal);
+      this.nonTerminals.put(nonTerminal.relName(), nonTerminal);
     }
   }
 
-  private String getTypeName(String input) {
-    return switch (input) {
-      case "Int" -> "int";
-      case "Bool" -> "bit";
-      default -> input;
-    };
+  /**
+   * Gets a generator function definition statement for a non-terminal.
+   * <p>
+   * It consists of:
+   * (a). A function declaration: generator [the output type] [the non-terminal name],
+   * (b). An argument list containing the input variable declarations,
+   * (c). A function body based on the non-terminal productions.
+   *
+   * @param semgusNonTerminal The SemGuS non-terminal
+   * @return a generator function definition statement for a non-terminal
+   */
+  private SketchStmt.FuncDefStmt getNonTerminalDefStmt(SemgusNonTerminal semgusNonTerminal) {
+    SemanticRule rule0 = SketchTranslator.getSemRule0(semgusNonTerminal);
+    NonTerminal nonTerminal = nonTerminals.get(rule0.head().name());
+
+    // Also build a struct declaration.
+    SketchType structType = new SketchType("", nonTerminal.name());
+    sketch.stmts().add(new SketchStmt.StructDefStmt(structType, nonTerminal.outputs()));
+
+    // (a). the function declaration
+    SketchType resType = new SketchType("generator", nonTerminal.name());
+    SketchDecl resDecl = new SketchDecl(resType, nonTerminal.name());
+
+    // (b). the argument list
+    List<SketchDecl> resArgs = nonTerminal.inputs();
+
+    // (c). the function body
+    SketchStmt.SeqStmt resBody = new SketchStmt.SeqStmt(new ArrayList<>(), " ");
+
+    // the result
+    SketchStmt.FuncDefStmt res = new SketchStmt.FuncDefStmt(resDecl, resArgs, resBody);
+
+    // Update (c).
+    resBody.stmts().add(new SketchStmt.AtomStmt("assert", new SketchExpr.AtomExpr("(bnd > 0)")));
+
+    List<SketchExpr> subexprs = new ArrayList<>();
+    resBody.stmts().add(new SketchStmt.AtomStmt("return", new SketchExpr.RegExpr(subexprs)));
+    int ruleCnt = 0;
+    for (SemgusProduction production : semgusNonTerminal.productions().values()) {
+      for (SemanticRule rule : production.semanticRules()) {
+        // Build a generator function for each semantic rule
+
+        // (a). the function declaration
+        String ruleDefName = nonTerminal.name() + "_rule" + (ruleCnt++);
+        SketchDecl ruleDefDecl = new SketchDecl(resType, ruleDefName);
+
+        // (c). the function body
+        SketchStmt.SeqStmt ruleDefBody = new SketchStmt.SeqStmt(new ArrayList<>(), " ");
+
+        // semantic rule generator function definition
+        SketchStmt.FuncDefStmt ruleDef = new SketchStmt.FuncDefStmt(
+            ruleDefDecl,
+            resArgs,
+            ruleDefBody
+        );
+        sketch.stmts().add(ruleDef);
+
+        for (RelationApp bodyRelation : rule.bodyRelations()) {
+          // Call the corresponding generator function for each CHC body relation
+          NonTerminal childNonTerminal = nonTerminals.get(bodyRelation.name());
+
+          String varDefName = "";
+          for (int i = 0; i < bodyRelation.arguments().size(); i++) {
+            TypedVar typedVar = bodyRelation.arguments().get(i);
+            if (childNonTerminal.attrs().get(i).isEmpty()) {
+              varDefName = typedVar.name();
+            }
+          }
+          List<SketchExpr> varDefCallArgs = new ArrayList<>();
+          SketchStmt.VarDefStmt varDefStmt = new SketchStmt.VarDefStmt(
+              new SketchDecl(new SketchType("", childNonTerminal.name()), varDefName),
+              new SketchExpr.FuncExpr(childNonTerminal.name(), varDefCallArgs)
+          );
+          ruleDefBody.stmts().add(varDefStmt);
+
+          for (int i = 0; i < bodyRelation.arguments().size(); i++) {
+            TypedVar typedVar = bodyRelation.arguments().get(i);
+            if (childNonTerminal.attrs().get(i).equals("input")) {
+              varDefCallArgs.add(new SketchExpr.AtomExpr(typedVar.name()));
+            } else if (childNonTerminal.attrs().get(i).equals("output")) {
+              ruleDefBody.stmts().add(new SketchStmt.VarDefStmt(
+                  new SketchDecl(new SketchType("", typedVar.type().name()), typedVar.name()),
+                  new SketchExpr.AtomExpr(varDefName + "." + childNonTerminal.vars().get(i))
+              ));
+            }
+          }
+          varDefCallArgs.add(new SketchExpr.AtomExpr("bnd - 1"));
+        }
+
+        // Build the return statement in the rule generator function.
+        SketchStmt.VarDefStmt retVarDefStmt = new SketchStmt.VarDefStmt(
+            new SketchDecl(structType, nonTerminal.varName()),
+            new SketchExpr.FuncExpr(
+                structType.toString(),
+                nonTerminal.outputs().stream()
+                    .filter(sketchDecl -> !sketchDecl.name().equals("bnd"))
+                    .map(sketchDecl -> new SketchExpr.AssignExpr(
+                        new SketchExpr.AtomExpr(sketchDecl.name()),
+                        new SketchExpr.AtomExpr("??")))
+                    .collect(Collectors.toList())
+            )
+        );
+        ruleDefBody.stmts().add(retVarDefStmt);
+        for (SketchDecl output : nonTerminal.outputs()) {
+          ruleDefBody.stmts().add(new SketchStmt.VarDefStmt(
+              output,
+              new SketchExpr.AtomExpr(nonTerminal.varName() + "." + output.name())
+          ));
+        }
+
+        // constraint assertion
+        SmtTerm constraint = rule.constraint();
+        SketchExpr e = eval(constraint);
+        ruleDefBody.stmts().add(new SketchStmt.AtomStmt("assert", e));
+
+        ruleDefBody.stmts().add(new SketchStmt.AtomStmt("return", new SketchExpr.AtomExpr(nonTerminal.varName())));
+
+        // Add the call as a part of the return statement in the non-terminal generator function.
+        List<SketchExpr> subexprArgs = resArgs.stream()
+            .map(sketchDecl -> new SketchExpr.AtomExpr(sketchDecl.name()))
+            .collect(Collectors.toList());
+        subexprs.add(new SketchExpr.FuncExpr(
+            ruleDefName, subexprArgs
+        ));
+      }
+    }
+    return res;
   }
 
-  private SketchExpr eval(SmtTerm term, Map<String, SketchExpr> dict) {
+
+  private SketchStmt.FuncDefStmt getHarnessDefStmt() {
+    SketchDecl resDecl = new SketchDecl(new SketchType("harness", "void"), "sketch");
+    List<SketchDecl> resArgs = new ArrayList<>();
+    SketchStmt.SeqStmt resBody = new SketchStmt.SeqStmt(new ArrayList<>(), " ");
+    SketchStmt.FuncDefStmt res = new SketchStmt.FuncDefStmt(resDecl, resArgs, resBody);
+
+
+
+    return res;
+  }
+
+//    for (SmtTerm constraint : problem.constraints()) {
+//      if (constraint instanceof SmtTerm.Application app) {
+//        List<List<String>> attrLists = semNameToAttrLists.get(app.name().name());
+//        int ind = 0;
+//        String callName = "";
+//        List<SketchExpr> callArgs = new ArrayList<>();
+//        SketchExpr outputExpr = null;
+//        for (SmtTerm.Application.TypedTerm appArg : app.arguments()) {
+//          String typeName = getTypeName(appArg.type().name());
+//          List<String> attrList = attrLists.get(ind);
+//          if (outputExpr == null && attrList.contains("output")) {
+//            outputExpr = eval(appArg.term(), new HashMap<>());
+//          } else if (attrList.contains("input")) {
+//            callArgs.add(eval(appArg.term(), new HashMap<>()));
+//          } else if (attrList.isEmpty()) {
+//            callName = eval(appArg.term(), new HashMap<>()).toString();
+//          }
+//          ++ind;
+//        }
+//        body = new SketchStmt.SeqStmt(
+//            body,
+//            " ",
+//            new SketchStmt.AtomStmt(
+//                "assert",
+//                new SketchExpr.BinaryExpr(
+//                    new SketchExpr.FuncExpr(callName, callArgs),
+//                    "==",
+//                    outputExpr
+//                ))
+//        );
+//      }
+//    }
+//
+//    return new SketchStmt.FuncDefStmt(
+//        new SketchDecl("harness void", "__sketch"),
+//        args,
+//        body);
+
+  public Sketch translate() {
+    sketch = new Sketch(new ArrayList<>());
+
+    for (SemgusNonTerminal semgusNonTerminal : problem.nonTerminals().values()) {
+      // Build a generator function definition for each non-terminal
+      sketch.stmts().add(getNonTerminalDefStmt(semgusNonTerminal));
+
+      // Target function
+//      if (semDefStmt instanceof SketchStmt.FuncDefStmt s && nonTerminal.equals(problem.targetNonTerminal())) {
+//        List<SketchDecl> targetArgs = new ArrayList<>(s.args());
+//        List<SketchExpr> callArgs =
+//            s.args().stream().map(decl -> new SketchExpr.AtomExpr(decl.name())).collect(Collectors.toList());
+//        targetArgs.remove(targetArgs.size() - 1);
+//        defs.add(
+//            new SketchStmt.FuncDefStmt(
+//                new SketchDecl(
+//                    s.decl().type().replaceAll("generator ", ""),
+//                    problem.targetName()),
+//                targetArgs,
+////                new SketchStmt.SeqStmt(
+////                    new SketchStmt.VarDefStmt(
+////                        new SketchDecl("int", "bnd"),
+////                        new SketchExpr.AtomExpr("3")
+////                    ),
+////                    " ",
+////                    new SketchStmt.AtomStmt(
+////                        "return",
+////                        new SketchExpr.FuncExpr(problem.targetNonTerminal().name(), callArgs)))
+//            ));
+//      }
+    }
+
+    sketch.stmts().add(getHarnessDefStmt());
+    return sketch;
+  }
+
+  /**
+   * Gets the first semantic rule of a non-terminal.
+   *
+   * @param nonTerminal The non-terminal
+   * @return the first semantic rule
+   */
+  public static SemanticRule getSemRule0(SemgusNonTerminal nonTerminal) {
+    return nonTerminal.productions().values().iterator().next().semanticRules().get(0);
+  }
+
+  private static SketchExpr eval(SmtTerm term) {
     // TODO: support quantifiers
     if (term instanceof SmtTerm.Application app) {
       return switch (app.name().name()) {
         case "+" -> new SketchExpr.BinaryExpr(
-            eval(app.arguments().get(0).term(), dict),
+            eval(app.arguments().get(0).term()),
             "+",
-            eval(app.arguments().get(1).term(), dict));
+            eval(app.arguments().get(1).term()));
         case "-" -> new SketchExpr.BinaryExpr(
-            eval(app.arguments().get(0).term(), dict),
+            eval(app.arguments().get(0).term()),
             "-",
-            eval(app.arguments().get(1).term(), dict));
+            eval(app.arguments().get(1).term()));
         case "*" -> new SketchExpr.BinaryExpr(
-            eval(app.arguments().get(0).term(), dict),
+            eval(app.arguments().get(0).term()),
             "*",
-            eval(app.arguments().get(1).term(), dict));
+            eval(app.arguments().get(1).term()));
         case "/" -> new SketchExpr.BinaryExpr(
-            eval(app.arguments().get(0).term(), dict),
+            eval(app.arguments().get(0).term()),
             "/",
-            eval(app.arguments().get(1).term(), dict));
+            eval(app.arguments().get(1).term()));
         case ">" -> new SketchExpr.BinaryExpr(
-            eval(app.arguments().get(0).term(), dict),
+            eval(app.arguments().get(0).term()),
             ">",
-            eval(app.arguments().get(1).term(), dict));
+            eval(app.arguments().get(1).term()));
         case ">=" -> new SketchExpr.BinaryExpr(
-            eval(app.arguments().get(0).term(), dict),
+            eval(app.arguments().get(0).term()),
             ">=",
-            eval(app.arguments().get(1).term(), dict));
+            eval(app.arguments().get(1).term()));
         case "<" -> new SketchExpr.BinaryExpr(
-            eval(app.arguments().get(0).term(), dict),
+            eval(app.arguments().get(0).term()),
             "<",
-            eval(app.arguments().get(1).term(), dict));
+            eval(app.arguments().get(1).term()));
         case "<=" -> new SketchExpr.BinaryExpr(
-            eval(app.arguments().get(0).term(), dict),
+            eval(app.arguments().get(0).term()),
             "<=",
-            eval(app.arguments().get(1).term(), dict));
+            eval(app.arguments().get(1).term()));
         case "=" -> new SketchExpr.BinaryExpr(
-            eval(app.arguments().get(0).term(), dict),
+            eval(app.arguments().get(0).term()),
             "==",
-            eval(app.arguments().get(1).term(), dict));
+            eval(app.arguments().get(1).term()));
         case "!=" -> new SketchExpr.BinaryExpr(
-            eval(app.arguments().get(0).term(), dict),
+            eval(app.arguments().get(0).term()),
             "!=",
-            eval(app.arguments().get(1).term(), dict));
+            eval(app.arguments().get(1).term()));
         case "and" -> new SketchExpr.BinaryExpr(
-            eval(app.arguments().get(0).term(), dict),
+            eval(app.arguments().get(0).term()),
             "&&",
-            eval(app.arguments().get(1).term(), dict));
+            eval(app.arguments().get(1).term()));
         case "or" -> new SketchExpr.BinaryExpr(
-            eval(app.arguments().get(0).term(), dict),
+            eval(app.arguments().get(0).term()),
             "||",
-            eval(app.arguments().get(1).term(), dict));
-        case "not" -> new SketchExpr.ConstExpr(
-            "!" + eval(app.arguments().get(0).term(), dict));
+            eval(app.arguments().get(1).term()));
+        case "not" -> new SketchExpr.UnaryExpr(
+            "!",
+            eval(app.arguments().get(0).term()));
         case "ite" -> new SketchExpr.CondExpr(
-            eval(app.arguments().get(0).term(), dict),
-            eval(app.arguments().get(1).term(), dict),
-            eval(app.arguments().get(2).term(), dict));
-        case "true" -> new SketchExpr.ConstExpr("true");
-        case "false" -> new SketchExpr.ConstExpr("false");
-        default -> new SketchExpr.ConstExpr(app.name().name());
+            eval(app.arguments().get(0).term()),
+            eval(app.arguments().get(1).term()),
+            eval(app.arguments().get(2).term()));
+        case "true" -> new SketchExpr.AtomExpr("true");
+        case "false" -> new SketchExpr.AtomExpr("false");
+        default -> new SketchExpr.AtomExpr(app.name().name());
       };
     }
 
     if (term instanceof SmtTerm.Variable x) {
-      return dict.getOrDefault(x.name(), new SketchExpr.ConstExpr(x.name()));
+      return new SketchExpr.AtomExpr(x.name());
     }
 
     if (term instanceof SmtTerm.CNumber n) {
-      return new SketchExpr.ConstExpr(String.valueOf(n.value()));
+      return new SketchExpr.AtomExpr(String.valueOf(n.value()));
     }
 
     if (term instanceof SmtTerm.CString s) {
-      return new SketchExpr.ConstExpr(s.value());
+      return new SketchExpr.AtomExpr(s.value());
     }
 
-    // TODO: support bit vectors
-
-    return new SketchExpr.ConstExpr("");
-  }
-
-  private SketchStmt getSemDefStmt(SemgusNonTerminal nonTerminal) {
-    // there must be at least one rule, right?
-    SemanticRule rule0 = nonTerminal.productions().values().iterator().next().semanticRules().get(0);
-    String semName = rule0.head().name();
-    List<TypedVar> semArgs = rule0.head().arguments();
-
-    // TODO: multiple output variables
-    String outputName = "";
-    String outputTypeName = "";
-    List<SketchDecl> args = new ArrayList<>();
-
-    List<List<String>> attrLists = semNameToAttrLists.get(semName);
-    int ind = 0;
-    for (TypedVar semArg : semArgs) {
-      // TODO: support bit vectors
-      String typeName = getTypeName(semArg.type().name());
-      List<String> attrList = attrLists.get(ind);
-      if (outputName.isEmpty() && attrList.contains("output")) {
-        outputName = semArg.name();
-        outputTypeName = typeName;
-      } else if (attrList.contains("input")) {
-        args.add(new SketchDecl(typeName, semArg.name()));
-      }
-      ++ind;
-    }
-    args.add(new SketchDecl("int", "bnd"));
-
-    List<SketchExpr> exprs = new ArrayList<>();
-    for (SemgusProduction production : nonTerminal.productions().values()) {
-      // TODO: why are there multiple rules?
-      SemanticRule rule = production.semanticRules().get(0);
-
-      Map<String, SketchExpr> callExprs = new HashMap<>();
-      for (RelationApp rel : rule.bodyRelations()) {
-        String callKey = "";
-        String callName = "";
-        List<SketchExpr> callExprArgs = new ArrayList<>();
-        int callInd = 0;
-        for (TypedVar relArg : rel.arguments()) {
-          String typeName = getTypeName(relArg.type().name());
-          List<String> attrList = semNameToAttrLists.get(rel.name()).get(callInd);
-          if (callKey.isEmpty() && attrList.contains("output")) {
-            callKey = relArg.name();
-          } else if (attrList.contains("input")) {
-            // TODO: why not eval here?
-            callExprArgs.add(new SketchExpr.ConstExpr(relArg.name()));
-          } else if (attrList.isEmpty()) {
-            callName = typeName;
-          }
-          ++callInd;
-        }
-        callExprArgs.add(new SketchExpr.ConstExpr("bnd - 1"));
-        callExprs.put(callKey, new SketchExpr.FuncExpr(
-            callName, callExprArgs
-        ));
-      }
-
-      SmtTerm constraint = rule.constraint();
-      SketchExpr e = eval(constraint, callExprs);
-      if (e instanceof SketchExpr.BinaryExpr be && be.binop().equals("==")) {
-        if (be.lhs().toString().equals(outputName)) {
-          exprs.add(be.rhs());
-        } else if (be.rhs().toString().equals(outputName)) {
-          exprs.add(be.lhs());
-        }
-      } else {
-        throw new IllegalStateException("Not a well-formed semantics relation.");
-      }
-    }
-
-    SketchExpr regex =
-        new SketchExpr.RegExpr(exprs);
-
-    SketchStmt bndCheck =
-        new SketchStmt.ConstStmt("assert", new SketchExpr.ConstExpr("bnd > 0"));
-    SketchStmt ret =
-        new SketchStmt.ConstStmt("return", regex);
-
-    SketchStmt body =
-        new SketchStmt.SeqStmt(bndCheck, " ", ret);
-
-    return new SketchStmt.funcDefStmt(
-        new SketchDecl("generator " + outputTypeName, nonTerminal.name()),
-        args,
-        body);
-  }
-
-  private SketchStmt getHarnessDefStmt() {
-    // TODO: quantifiers
-    List<SketchDecl> args = new ArrayList<>();
-
-    // TODO: harness body
-    SketchStmt body = new SketchStmt.ConstStmt("assert", new SketchExpr.ConstExpr("true"));
-
-    for (SmtTerm constraint : problem.constraints()) {
-      if (constraint instanceof SmtTerm.Application app) {
-        List<List<String>> attrLists = semNameToAttrLists.get(app.name().name());
-        int ind = 0;
-        String callName = "";
-        List<SketchExpr> callArgs = new ArrayList<>();
-        SketchExpr outputExpr = null;
-        for (SmtTerm.Application.TypedTerm appArg : app.arguments()) {
-          // TODO: support bit vectors
-          String typeName = getTypeName(appArg.type().name());
-          List<String> attrList = attrLists.get(ind);
-          if (outputExpr == null && attrList.contains("output")) {
-            outputExpr = eval(appArg.term(), new HashMap<>());
-          } else if (attrList.contains("input")) {
-            callArgs.add(eval(appArg.term(), new HashMap<>()));
-          } else if (attrList.isEmpty()) {
-            callName = eval(appArg.term(), new HashMap<>()).toString();
-          }
-          ++ind;
-        }
-        body = new SketchStmt.SeqStmt(
-            body,
-            " ",
-            new SketchStmt.ConstStmt(
-                "assert",
-                new SketchExpr.BinaryExpr(
-                    new SketchExpr.FuncExpr(callName, callArgs),
-                    "==",
-                    outputExpr
-                ))
-        );
-      }
-    }
-
-    return new SketchStmt.funcDefStmt(
-        new SketchDecl("harness void", "__sketch"),
-        args,
-        body);
-  }
-
-  public Sketch translate() {
-    List<SketchStmt> defs = new ArrayList<>();
-
-    for (SemgusNonTerminal nonTerminal : problem.nonTerminals().values()) {
-      SketchStmt semDefStmt = getSemDefStmt(nonTerminal);
-      defs.add(semDefStmt);
-
-      // target function
-      if (semDefStmt instanceof SketchStmt.funcDefStmt s && nonTerminal.equals(problem.targetNonTerminal())) {
-        List<SketchDecl> targetArgs = new ArrayList<>(s.args());
-        List<SketchExpr> callArgs =
-            s.args().stream().map(decl -> new SketchExpr.ConstExpr(decl.name())).collect(Collectors.toList());
-        targetArgs.remove(targetArgs.size() - 1);
-        defs.add(
-            new SketchStmt.funcDefStmt(
-                new SketchDecl(
-                    s.decl().type().replaceAll("generator ", ""),
-                    problem.targetName()),
-                targetArgs,
-                new SketchStmt.SeqStmt(
-                    new SketchStmt.varDefStmt(
-                        new SketchDecl("int", "bnd"),
-                        new SketchExpr.ConstExpr("3")
-                    ),
-                    " ",
-                    new SketchStmt.ConstStmt(
-                        "return",
-                        new SketchExpr.FuncExpr(problem.targetNonTerminal().name(), callArgs)))
-            ));
-      }
-    }
-
-    defs.add(getHarnessDefStmt());
-    return new Sketch(defs);
+    return new SketchExpr.AtomExpr("");
   }
 }
